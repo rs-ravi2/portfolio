@@ -1,0 +1,20 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { profile } from "../data/profile";
+---
+
+<Layout title={`Page not found · ${profile.name}`} description="This page does not exist." path="/404/">
+  <header class="masthead">
+    <div class="wrap masthead-inner">
+      <a class="wordmark" href="/">{profile.name}</a>
+    </div>
+  </header>
+  <main id="main" class="case">
+    <div class="wrap prose">
+      <p class="kicker">404</p>
+      <h1>This page does not exist</h1>
+      <p class="lede">The link may be old or mistyped.</p>
+      <p><a class="button" href="/">Go to the main page</a></p>
+    </div>
+  </main>
+</Layout>

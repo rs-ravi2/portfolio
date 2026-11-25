@@ -1,0 +1,46 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { render } from "astro:content";
+import { getPublicCaseStudies, type CaseStudy } from "../../lib/case-studies";
+import { profile } from "../../data/profile";
+import { services } from "../../data/services";
+
+export async function getStaticPaths() {
+  const studies = await getPublicCaseStudies();
+  return studies.map((study) => ({ params: { slug: study.id }, props: { study } }));
+}
+
+const { study } = Astro.props as { study: CaseStudy };
+const { Content } = await render(study);
+const d = study.data;
+const service = services.find((s) => s.id === d.service);
+---
+
+<Layout title={`${d.title} · ${profile.name}`} description={d.summary} path={`/work/${study.id}/`}>
+  <header class="masthead">
+    <div class="wrap masthead-inner">
+      <a class="wordmark" href="/">{profile.name}</a>
+      <nav aria-label="Sections"><ul><li><a href="/#services">Services</a></li><li><a href="/#about">About</a></li></ul></nav>
+    </div>
+  </header>
+  <main id="main" class="case">
+    <article class="wrap prose">
+      <p class="kicker">{service?.title} · <time datetime={d.date.toISOString().slice(0, 10)}>{d.date.toLocaleDateString("en-IN", { year: "numeric", month: "long" })}</time></p>
+      <h1>{d.title}</h1>
+      <p class="lede">{d.summary}</p>
+      <dl class="handoff">
+        <div><dt>Input</dt><dd>{d.input}</dd></div>
+        <div><dt>Output</dt><dd>{d.output}</dd></div>
+        <div class="handoff-check"><dt>Accepted when</dt><dd>{d.acceptance}</dd></div>
+      </dl>
+      {d.outcomes.length > 0 && (
+        <>
+          <h2>Outcomes</h2>
+          <ul>{d.outcomes.map((o) => <li>{o}</li>)}</ul>
+        </>
+      )}
+      <Content />
+      <p><a class="text-link" href="/">← Back to the main page</a></p>
+    </article>
+  </main>
+</Layout>

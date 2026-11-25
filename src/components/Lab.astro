@@ -1,0 +1,185 @@
+---
+import { corpus, questions, synonymRules, defaultQuestionId, defaultK, kOptions } from "../lab/corpus";
+import { buildIndex, evaluate, BM25_K1, BM25_B, SYNONYM_WEIGHT } from "../lab/engine";
+import { renderComparison, renderMetrics } from "../lab/render";
+
+// Build-time default: the static HTML visitors see before (or without) JavaScript.
+const index = buildIndex(corpus);
+const ev = evaluate(index, questions, synonymRules, defaultK);
+const selected = ev.perQuestion.find((p) => p.question.id === defaultQuestionId)!;
+const comparisonHtml = renderComparison(selected, defaultK);
+const metricsHtml = renderMetrics(ev, defaultQuestionId);
+---
+
+<section id="lab" class="lab" aria-labelledby="lab-title">
+  <div class="wrap">
+    <header class="section-head lab-head">
+      <p class="kicker">Retrieval lab <span class="kicker-note">Synthetic corpus · local demonstration</span></p>
+      <h2 id="lab-title">Can this search find the right source for this question?</h2>
+      <p class="dek">
+        Fourteen invented public-service pages from a fictional town called Elmbrook, ten questions with known
+        right answers, and two ways to search. Choose a question and compare plain keyword matching with
+        keyword matching plus a small synonym map you can see and switch off.
+      </p>
+    </header>
+
+    <form class="lab-controls" id="lab-controls" data-requires-js aria-label="Lab controls">
+      <fieldset class="control control-questions">
+        <legend>Question</legend>
+        <div class="choices">
+          {questions.map((q) => (
+            <label class="choice">
+              <input type="radio" name="question" value={q.id} checked={q.id === defaultQuestionId} />
+              <span>{q.text}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset class="control control-k">
+        <legend>Show top</legend>
+        <div class="choices choices-inline">
+          {kOptions.map((k) => (
+            <label class="choice choice-k">
+              <input type="radio" name="k" value={k} checked={k === defaultK} />
+              <span>{k}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </form>
+
+    <noscript>
+      <p class="noscript-note">
+        Showing the default question with the top {defaultK} results. Turn on JavaScript to choose other questions,
+        change the cut-off or switch synonym rules. The per-question table below covers every question either way.
+      </p>
+    </noscript>
+
+    <div id="lab-output" class="lab-output">
+      <Fragment set:html={comparisonHtml} />
+    </div>
+
+    <div class="lab-lower">
+      <section class="synonyms" aria-labelledby="synonyms-title">
+        <h3 id="synonyms-title">The synonym map</h3>
+        <p class="small">
+          Approach B adds these words when the question contains the word on the left. Added words count at half weight.
+          <span data-requires-js>Switch a rule off to see what it was doing.</span>
+        </p>
+        <ul class="rules" id="lab-rules">
+          {synonymRules.map((r) => (
+            <li>
+              <label class="rule">
+                <input type="checkbox" name="rule" value={r.id} checked form="lab-controls" data-requires-js />
+                <code>{r.from}</code>
+                <span class="arrow" aria-label="adds">→</span>
+                <code>{r.to.join(", ")}</code>
+              </label>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section class="metrics" aria-labelledby="metrics-title">
+        <h3 id="metrics-title">Across all questions</h3>
+        <div id="lab-metrics">
+          <Fragment set:html={metricsHtml} />
+        </div>
+      </section>
+    </div>
+
+    <div class="tradeoff">
+      <h3>The trade-off</h3>
+      <p>
+        Synonyms raise recall: the sofa, bin and beer questions only find their pages because of them. They also
+        bring in new wrong answers. The rule <code>permit → licence</code> fixes the beer question and breaks the
+        van question, where the street-trading page now outranks parking permits. And no rule helps “lamp post”,
+        because nobody wrote one. In a real project, that is why a synonym list, a prompt or a retriever change gets
+        judged on a labeled question set, not on the one example that prompted it.
+      </p>
+    </div>
+
+    <details class="how">
+      <summary>How it works</summary>
+      <div class="how-body">
+        <ol>
+          <li>
+            <strong>Words.</strong> Each question and document is lowercased and split into words. Common words such as
+            “the” and “do” are dropped, and a small suffix rule makes “permits” match “permit”.
+          </li>
+          <li>
+            <strong>Scoring (A).</strong> Each document is scored with BM25 (k1 = {BM25_K1}, b = {BM25_B}), a standard
+            keyword formula: matches on rarer words count more, repeats help with diminishing returns, and long pages
+            are discounted.
+          </li>
+          <li>
+            <strong>Synonyms (B).</strong> Same scoring, but each rule whose left-hand word appears in the question adds
+            its words at {SYNONYM_WEIGHT}× weight.
+          </li>
+          <li>
+            <strong>Ranking and ties.</strong> Higher score first. Equal scores are ordered by document id, so the same
+            input always gives the same ranking. Documents sharing no word with the question are not retrieved.
+          </li>
+          <li>
+            <strong>Metrics.</strong> Recall@k and MRR@k are calculated per question from those rankings, then averaged
+            over all {questions.length} labeled questions. The table reports the rank of the first expected source.
+          </li>
+        </ol>
+        <p class="small">
+          Everything runs in this page. No model, API, network request, cookie or stored visitor data. The corpus,
+          questions and labels are invented for this demonstration.
+        </p>
+      </div>
+    </details>
+
+    <p id="lab-status" class="visually-hidden" role="status" aria-live="polite"></p>
+  </div>
+</section>
+
+<script>
+  import { corpus, questions, synonymRules } from "../lab/corpus";
+  import { buildIndex, evaluate } from "../lab/engine";
+  import { announce, renderComparison, renderMetrics } from "../lab/render";
+
+  const form = document.getElementById("lab-controls") as HTMLFormElement | null;
+  const output = document.getElementById("lab-output");
+  const metrics = document.getElementById("lab-metrics");
+  const status = document.getElementById("lab-status");
+
+  if (form && output && metrics && status) {
+    const index = buildIndex(corpus);
+    let timer: number | undefined;
+
+    const update = (speak = true) => {
+      const data = new FormData(form);
+      const questionId = String(data.get("question"));
+      const k = Number(data.get("k"));
+      const enabled = new Set(data.getAll("rule").map(String));
+      const rules = synonymRules.filter((r) => enabled.has(r.id));
+
+      const ev = evaluate(index, questions, rules, k);
+      const selected = ev.perQuestion.find((p) => p.question.id === questionId);
+      if (!selected) return;
+
+      output.innerHTML = renderComparison(selected, k);
+      metrics.innerHTML = renderMetrics(ev, questionId);
+      if (!speak) return;
+      output.classList.remove("is-updated");
+      void output.offsetWidth;
+      output.classList.add("is-updated");
+
+      // One quiet announcement per settled change.
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        status.textContent = announce(ev, questionId);
+      }, 300);
+    };
+
+    form.addEventListener("change", () => update());
+    // Rule checkboxes live outside the <form> element (linked with form=""), so listen there too.
+    document.getElementById("lab-rules")?.addEventListener("change", () => update());
+    form.addEventListener("submit", (e) => e.preventDefault());
+    // Restore state if the browser kept form values on back/forward.
+    update(false);
+  }
+</script>
